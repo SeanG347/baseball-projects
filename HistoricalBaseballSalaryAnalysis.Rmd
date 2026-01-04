@@ -1,0 +1,183 @@
+---
+title: "Historical MLB Salary Analaysis"
+author: "Sean Guglietti"
+date: "2025-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+```
+
+### Retrieving data
+
+```{r salaryRetrieval, include = TRUE}
+
+# This code chunk will retrieve the salary data from github, and transform it 
+# to a dataframe.
+
+url <- "https://raw.githubusercontent.com/SeanG347/LahmanBaseballDatabase/refs/heads/main/Salaries.csv"
+salary.data <- read.csv(url, header = TRUE, sep = ",")      
+salary.df <- data.frame(salary.data)
+
+# Only including records in the modern era.
+
+salary.df <- salary.df[salary.df$yearID > 1953, ] 
+
+# Creating another data-frame which provides the mean salary by year.
+
+mean_salary_by_year <- salary.df %>%
+  group_by(yearID) %>%
+  summarise(mean_salary = mean(salary))
+
+# Plotting the mean salary by year
+
+ggplot(data = mean_salary_by_year, aes(x=yearID, y = mean_salary)) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  labs(
+    xlab = "Year",
+    ylab = "Average Salary"
+  )
+
+# Creating a dataframe which groups by the teamID and yearID to give the 
+# yearly salary for each team.
+
+yearly_salary_by_team <- salary.df %>% 
+  group_by(teamID, yearID) %>%
+  summarise(teamSalary = sum(salary), .groups = "drop")
+```
+
+```{r battingRetrieval, include = TRUE}
+# This code chunk retrieves MLB batting data, creates features of interest -  
+# (Batting average (AVG), on-base percentage (OBP), Slugging percentage (SLG),
+# and on-base-plus-slugging (OPS)). This will provide an opportunity to see how 
+# these statistics have varied historically, but more importantly, will provide 
+# a way to quantify offensive production - something that has been historically
+# more expensive than defensive production in the MLB.
+
+url <- "https://raw.githubusercontent.com/SeanG347/LahmanBaseballDatabase/refs/heads/main/Batting.csv"
+batting.data <- read.csv(url, header=TRUE,sep=",")
+batting.df <- data.frame(batting.data)
+
+# This ensures no records with 0 AB's, note this is possible as there are players
+# who come into only a single game as a defensive substitute and never gets an
+# AB. Or a player who only had a few times up and walked (which would be a 
+# plate appearance, not an at-bat)
+
+batting.df = batting.df[batting.df$AB > 0, ]
+
+# Calculating the AVG, SLG, PA, OBP, OPS statistics from the recorded number of
+# hits, doubles, triples, home runs, walks, sacrifice flies, hit-by-pitches,
+# and at-bats.
+
+batting.df$AVG = batting.df$H/batting.df$AB
+batting.df$SLG = with(batting.df, ((H-X2B-X3B-HR)+2*X2B + 3*X3B + 4*HR)/AB)
+batting.df$PA = with(batting.df, AB + BB + HBP + SF)
+batting.df$OBP = with(batting.df, (H+BB+HBP)/PA)
+batting.df$OPS = with(batting.df, OBP + SLG)
+
+# Creating a dataframe which will have the mean batting average of all players
+# per year.
+
+mean_ba_by_year = batting.df %>%
+  group_by(yearID) %>%
+  summarise(mean_ba = mean(AVG))
+
+# Plotting the mean_ba_by_year dataframe.
+
+ggplot(data = mean_ba_by_year, aes(x=yearID, y = mean_ba)) + 
+  geom_point(color = "red") +
+  labs(
+    x = "Year",
+    y = "League Average Batting Average",
+    title = "League Average AVG by year"
+  )
+
+# Filtering the batting.df dataframe to only include entries after 1953, which 
+# is when sac flies began actually being counted, and assigning that filtered
+# dataframe to a new one, modern.batting.df
+
+modern.batting.df <- batting.df[batting.df$yearID > 1953,]
+
+# Creating two aggregate dataframes which include the mean BA and OPS by year
+# from the modern.batting.df dataframe.
+
+mean_ba_by_year_modern = modern.batting.df %>% 
+  group_by(yearID) %>% 
+  summarise(mean_avg = mean(AVG))
+
+mean_ops_by_year = modern.batting.df %>% 
+  group_by(yearID) %>%
+  summarise(mean_ops = mean(OPS))
+
+means <- data.frame(year = mean_ops_by_year$yearID,
+                    OPS = mean_ops_by_year$mean_ops,
+                    AVG = mean_ba_by_year_modern$mean_avg)
+
+# Plotting the means
+
+ggplot(data = means) +
+  geom_point(color = "red", data = means, aes(x=year,y=AVG)) +
+  geom_point(color = "blue", data = means, aes(x=year,y=OPS))+
+  labs(
+    x = "Year",
+    y = "League Average OPS",
+    title = "League Average OPS. AVG by year"
+  )
+
+```
+
+
+### Notes
+  - I will from now on only use the "modern.batting.df" dataframe, which contains entries only after 1953, as that is when sacrifices were tracked, which allows the plate appearance stat to be accurate. 
+  - Hypothesis:
+    - Salary has a bearing on team success ($H_0$: $\beta_{salary}$ = 0, $H_1$: $\beta_{salary}$ > 0)
+      - Note: Winning percentage will be used as the response to operationalize "team success"
+
+```{r SalaryHypothesis}
+url <- "https://raw.githubusercontent.com/SeanG347/LahmanBaseballDatabase/refs/heads/main/Teams.csv"
+team.data <- read.csv(url, header=TRUE,sep=",")
+team.df <- data.frame(team.data)
+
+# Reducing data to only include the modern era (since sacrifices were tracked)
+team.df <- team.df[team.df$yearID > 1953,]
+
+# Making a new feature for the team's win percentage, this is to operationalize team success.
+team.df$winPerc = team.df$W/(team.df$W+team.df$L)
+
+# Making a new dataframe with only the relevant features
+relFeatures = c('yearID','teamID','G','W','L','winPerc')
+team.df.small <- team.df[relFeatures]
+head(team.df.small)
+
+# Sorting dataframe by winPerc
+head(team.df.small[order(team.df.small$winPerc, decreasing = TRUE),])
+
+```
+
+
+```{r Aggregating}
+# This chunk will group and summarise the salaries of the individual players into a dataframe containing the total salaries of the teams per year.
+
+team.salary.df <- salary.df %>%
+  group_by(teamID, yearID) %>%
+  summarise(teamSalary = sum(salary, na.rm=TRUE))
+
+team.df.small <- team.df.small %>%
+  right_join(team.salary.df, by = c("teamID","yearID"))
+
+head(team.df.small)
+```
+
+``` {r Analysis}
+# This chunk carries out the analysis between the team winning percentage and their teamsalary.
+
+with(team.df.small,cor.test(teamSalary, winPerc))
+```
+
+## Results
+  - The Pearson's product-moment correlation test yields a t-value of 6.6332, which means there is sufficient evidence to reject the null hypothesis (which is that $\beta_[salary]$ = 0), and due to the fact that the calculated correlation coefficient was found to be 0.2141, there is evidence of a positive correlation between a team's salary and winning percentage (i.e., $\beta_[salary]$ > 0).
