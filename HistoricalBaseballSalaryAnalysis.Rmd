@@ -2,7 +2,9 @@
 title: "Historical MLB Salary Analaysis"
 author: "Sean Guglietti"
 date: "2025-10-22"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -180,4 +182,45 @@ with(team.df.small,cor.test(teamSalary, winPerc))
 ```
 
 ## Results
-  - The Pearson's product-moment correlation test yields a t-value of 6.6332, which means there is sufficient evidence to reject the null hypothesis (which is that $\beta_[salary]$ = 0), and due to the fact that the calculated correlation coefficient was found to be 0.2141, there is evidence of a positive correlation between a team's salary and winning percentage (i.e., $\beta_[salary]$ > 0).
+  - The Pearson's product-moment correlation test yields a t-value of 6.6332, which means there is sufficient evidence to reject the null hypothesis (which is that $\beta_{salary}$ = 0), and due to the fact that the calculated correlation coefficient was found to be 0.2141, there is evidence of a positive correlation between a team's salary and winning percentage (i.e., $\beta_{salary}$ > 0).
+  
+```{r Normalizing Salary}
+
+team.salary.df <- salary.df %>%
+  group_by(teamID, yearID) %>%
+  summarise(teamSalary = sum(salary, na.rm=TRUE))
+
+league.salary.mean <- team.salary.df %>%
+  group_by(yearID) %>%
+  summarise(leagueAvg = mean(teamSalary, na.rm=TRUE))
+
+league.salary.sd <- team.salary.df %>%
+  group_by(yearID) %>%
+  summarise(leagueSd = sd(teamSalary, na.rm=TRUE))
+
+
+
+
+team.salary.df <- team.salary.df %>%
+  left_join(league.salary.mean, by='yearID')
+team.salary.df <- team.salary.df %>%
+  left_join(league.salary.sd, by='yearID')
+
+team.salary.df['normSalary'] <- (team.salary.df['teamSalary']-team.salary.df['leagueAvg'])/team.salary.df['leagueSd']
+
+team.salary.df
+
+```
+
+```{r Hypothesis Test with Normalized Salary}
+
+team.df.small <- team.df.small %>%
+  right_join(team.salary.df, by = c("teamID","yearID"))
+
+with(team.df.small, cor.test(winPerc,normSalary))
+
+```
+
+## Results
+
+  - After normalizing the team salaries with the mean and standard deviations of the overall team salaries for each year, the magnitude of the correlation coefficient increased by over 75%. This is likely due to how the salary has increased over time dramatically, so it is important to compare the teams relative to the teams in their year, rather than the salaries overall. To conclude, there is very clear evidence that spending more money relative to your opposition does have a positive correlation on winning percentage, but of course, this is contingent on spending money $\textit{well}$, which is something this model cannot evaluate as of right now.
